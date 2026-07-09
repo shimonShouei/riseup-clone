@@ -28,6 +28,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // BuildConfig.DEBUG gates the demo/seeded dashboard mode (see MainActivity).
+        buildConfig = true
     }
     testOptions {
         // Room DAO tests run on the JVM via Robolectric, which needs Android

@@ -1,9 +1,19 @@
 package com.riseup.clone.ui.dashboard
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.riseup.clone.data.ConnectionStore
+import com.riseup.clone.data.PersistedTransactionRepository
+import com.riseup.clone.data.PreferencesConnectionStore
 import com.riseup.clone.data.SeededTransactionRepository
 import com.riseup.clone.data.TransactionRepository
+import com.riseup.clone.data.local.LedgerDatabase
+import com.riseup.clone.data.sync.AppSync
+import com.riseup.clone.data.sync.BankConnector
+import com.riseup.clone.data.sync.CsvBankConnector
+import com.riseup.clone.data.sync.SyncState
 import com.riseup.clone.domain.engine.ForecastEngine
 import com.riseup.clone.domain.model.Transaction
 import java.time.LocalDate
@@ -14,10 +24,21 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Reads the household ledger from [repository] (the persisted Room store in the
+ * real app; see [factory]) and derives the dashboard's forecast/chart/breakdown.
+ *
+ * Sync surface: [syncState] mirrors the process-wide [AppSync] state so the screen
+ * can show an error banner / progress, and [resync] triggers a foreground re-sync.
+ * When a sync completes successfully the ledger is reloaded, so freshly synced rows
+ * appear without leaving the screen.
+ */
 class DashboardViewModel(
-    private val repository: TransactionRepository = SeededTransactionRepository(),
+    private val repository: TransactionRepository,
     private val engine: ForecastEngine = ForecastEngine(),
     private val clock: () -> LocalDate = { LocalDate.now() },
+    val syncState: StateFlow<SyncState> = AppSync.state,
+    private val onResync: suspend () -> Unit = {},
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<DashboardUiState>(DashboardUiState.Loading)
@@ -31,6 +52,16 @@ class DashboardViewModel(
 
     init {
         viewModelScope.launch { load() }
+        // Reload the ledger whenever a sync finishes writing new data, so the
+        // dashboard reflects synced transactions without a manual refresh.
+        viewModelScope.launch {
+            syncState.collect { if (it is SyncState.Success) load() }
+        }
+    }
+
+    /** Trigger a manual re-sync; progress/results surface via [syncState]. */
+    fun resync() {
+        viewModelScope.launch { onResync() }
     }
 
     private suspend fun load() {
@@ -94,5 +125,37 @@ class DashboardViewModel(
                     fraction = amount / total,
                 )
             }
+    }
+
+    companion object {
+        /**
+         * Builds a ViewModel reading the persisted Room ledger (real mode) or the
+         * in-memory seed ([demo] mode — kept reachable so the seeded hero visual can
+         * still be previewed). In real mode [PersistedTransactionRepository] seeds
+         * itself on an empty DB, so the dashboard shows the seed forecast until a
+         * real sync writes data; [resync] runs a foreground sync of the connected
+         * bank.
+         */
+        fun factory(context: Context, demo: Boolean = false): ViewModelProvider.Factory {
+            val app = context.applicationContext
+            return object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    val repo: TransactionRepository = if (demo) {
+                        SeededTransactionRepository()
+                    } else {
+                        PersistedTransactionRepository(LedgerDatabase.build(app).ledgerDao())
+                    }
+                    val connectionStore: ConnectionStore = PreferencesConnectionStore(app)
+                    val connector: BankConnector = CsvBankConnector(app)
+                    return DashboardViewModel(
+                        repository = repo,
+                        onResync = {
+                            connectionStore.connectedInstitution()?.let { connector.runSync(it) }
+                        },
+                    ) as T
+                }
+            }
+        }
     }
 }
