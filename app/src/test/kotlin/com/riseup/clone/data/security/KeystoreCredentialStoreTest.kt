@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.riseup.clone.domain.scraper.ScraperCredentials
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
+import kotlin.test.assertIs
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -15,7 +15,24 @@ import org.robolectric.RobolectricTestRunner
  * End-to-end round-trip against the real [KeystoreCredentialStore] — encrypting
  * through the platform Keystore + JCE and persisting ciphertext in a real
  * [android.content.SharedPreferences]. Confirms save/load returns the same
- * credentials, that clear removes them, and overwrite semantics.
+ * credentials (as [CredentialLoad.Loaded]), that clear removes them (returns
+ * [CredentialLoad.Absent]), and overwrite semantics.
+ *
+ * ### Device-unlock binding (M2-8) is verified on a device, not here
+ * The production key is now bound to a *recent device unlock*
+ * ([android.security.keystore.KeyGenParameterSpec.Builder.setUserAuthenticationRequired]
+ * with a short validity window, `AUTH_DEVICE_CREDENTIAL or AUTH_BIOMETRIC_STRONG` on API
+ * 30+ / the deprecated validity-duration on 26–29, and
+ * `setInvalidatedByBiometricEnrollment(true)`). The behaviours that binding adds —
+ * a decrypt with no recent unlock yielding [CredentialLoad.AuthRequired], and a
+ * lock/biometric change yielding [CredentialLoad.KeyInvalidated] — are inherently
+ * device-only: they require a real secured lock screen and user authentication that
+ * no JVM/Robolectric environment provides. They must be verified on a physical
+ * device (see the notes in [KeystoreCredentialStore]); this suite covers only the
+ * save/load/clear contract. The mapping of those Keystore exceptions to typed
+ * outcomes, and every caller's reaction to them, is covered on the JVM by
+ * [com.riseup.clone.data.sync.LedgerSyncerTest] and
+ * [com.riseup.clone.ui.connect.ConnectBankViewModelTest] with fakes.
  *
  * Ignored on this build machine only, for two independent reasons: (1) the same
  * Robolectric limitation as [com.riseup.clone.data.PersistedTransactionRepositoryTest]
@@ -46,7 +63,7 @@ class KeystoreCredentialStoreTest {
 
         store.save(institution, creds)
 
-        assertEquals(creds, store.load(institution))
+        assertEquals(CredentialLoad.Loaded(creds), store.load(institution))
     }
 
     @Test
@@ -56,7 +73,8 @@ class KeystoreCredentialStoreTest {
 
         store.clear(institution)
 
-        assertNull(store.load(institution))
+        assertIs<CredentialLoad.Absent>(store.load(institution))
+        Unit
     }
 
     @Test
@@ -67,6 +85,6 @@ class KeystoreCredentialStoreTest {
         val updated = creds.copy(password = "newpass")
         store.save(institution, updated)
 
-        assertEquals(updated, store.load(institution))
+        assertEquals(CredentialLoad.Loaded(updated), store.load(institution))
     }
 }

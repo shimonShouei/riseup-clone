@@ -295,6 +295,10 @@ private fun DiscountFields(
 private fun connectErrorMessage(error: ConnectError): String = when (error) {
     ConnectError.INVALID_CREDENTIALS ->
         "Those login details were rejected. Double-check your ID, password, and user code."
+    ConnectError.AUTH_REQUIRED ->
+        "Unlock your device, then tap Connect & sync again."
+    ConnectError.KEY_INVALIDATED ->
+        "Your device lock or biometrics changed, so your saved login was cleared. Enter it again to reconnect."
     ConnectError.NETWORK ->
         "Can't reach your backend — is it running and are you on the VPN?"
     ConnectError.OTP_REQUIRED ->

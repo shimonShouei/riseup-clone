@@ -45,9 +45,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // Keep the recurring background sync scheduled; it no-ops until a bank is
-        // connected (SyncGraph returns no syncer).
-        LedgerSyncWorker.schedulePeriodicSync(applicationContext)
+        // Security (M2-8; backend/SECURITY.md §3 refinement 2): background sync is
+        // DISABLED. The credential key is bound to a recent device unlock, so a
+        // headless worker can no longer decrypt the bank credentials / bearer token —
+        // it would only fail or auth-prompt unattended. Sync is foreground-only: it
+        // runs on app open (DashboardViewModel triggers a foreground sync in its init,
+        // right after the user unlocked to open the app) and via the manual "Sync now"
+        // / resync action. Here we only cancel any periodic work an older build left
+        // enqueued.
+        LedgerSyncWorker.cancelPeriodicSync(applicationContext)
 
         setContent {
             RiseUpTheme {

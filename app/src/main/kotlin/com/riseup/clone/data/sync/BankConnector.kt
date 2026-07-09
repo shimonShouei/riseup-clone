@@ -60,15 +60,14 @@ class CsvBankConnector(context: Context) : BankConnector {
             return SyncOutcome.Failed(SyncErrorReason.UNKNOWN, message)
         }
 
-        // First import pulls the whole statement (wide window); the periodic worker
-        // then keeps the recent window fresh. The mapper's stable ids make the
-        // overlap harmless (repeat rows dedupe).
+        // First import pulls the whole statement (wide window); subsequent foreground
+        // syncs keep the recent window fresh. The mapper's stable ids make the overlap
+        // harmless (repeat rows dedupe).
+        //
+        // M2-8: no periodic background sync is scheduled — sync is foreground-only so
+        // the device-unlock-bound credential key can be decrypted (SECURITY.md §3).
         val outcome = syncer.sync(DateRange(FIRST_IMPORT_FROM, LocalDate.now()))
         AppSync.publish(syncer.state.value)
-
-        if (outcome is SyncOutcome.Synced) {
-            LedgerSyncWorker.schedulePeriodicSync(appContext)
-        }
         return outcome
     }
 

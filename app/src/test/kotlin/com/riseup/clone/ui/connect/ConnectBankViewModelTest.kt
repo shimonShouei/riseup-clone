@@ -7,6 +7,7 @@ import com.riseup.clone.data.InMemoryConnectionStore
 import com.riseup.clone.data.scraper.RemoteBankScraper
 import com.riseup.clone.data.security.CredentialStore
 import com.riseup.clone.data.security.InMemoryCredentialStore
+import com.riseup.clone.data.security.loadOrNull
 import com.riseup.clone.data.sync.BankConnector
 import com.riseup.clone.data.sync.RemoteBankConnector
 import com.riseup.clone.data.sync.SyncErrorReason
@@ -95,7 +96,7 @@ class ConnectBankViewModelTest {
         val form = assertIs<ConnectBankUiState.Form>(viewModel.uiState.value)
         assertNotNull(form.validationError)
         assertEquals(0, connector.syncCount)
-        assertNull(credentials.load(institution))
+        assertNull(credentials.loadOrNull(institution))
         assertFalse(viewModel.connected.value == true)
     }
 
@@ -122,7 +123,7 @@ class ConnectBankViewModelTest {
         viewModel.submit(institution = institution, username = "user", password = "secret")
 
         // save-credentials-then-connected
-        assertNotNull(credentials.load(institution))
+        assertNotNull(credentials.loadOrNull(institution))
         // sync-success -> connected + navigate
         assertEquals(institution, connection.connectedInstitution())
         assertEquals(institution, connector.registered)
@@ -146,7 +147,7 @@ class ConnectBankViewModelTest {
         assertEquals("rejected", form.errorMessage)
         assertEquals(ConnectError.INVALID_CREDENTIALS, form.connectError)
         // Credentials were saved, but a failed first sync must not route past onboarding.
-        assertNotNull(credentials.load(institution))
+        assertNotNull(credentials.loadOrNull(institution))
         assertNull(connection.connectedInstitution())
         assertFalse(viewModel.connected.value == true)
     }
@@ -181,8 +182,8 @@ class ConnectBankViewModelTest {
         assertNotNull(assertIs<ConnectBankUiState.Form>(viewModel.uiState.value).validationError)
 
         assertEquals(0, connector.syncCount)
-        assertNull(credentials.load(discount))
-        assertNull(credentials.load(RemoteBankConnector.BACKEND_TOKEN_KEY))
+        assertNull(credentials.loadOrNull(discount))
+        assertNull(credentials.loadOrNull(RemoteBankConnector.BACKEND_TOKEN_KEY))
     }
 
     @Test
@@ -203,8 +204,8 @@ class ConnectBankViewModelTest {
 
         assertNotNull(assertIs<ConnectBankUiState.Form>(viewModel.uiState.value).validationError)
         assertEquals(0, connector.syncCount)
-        assertNull(credentials.load(discount))
-        assertNull(credentials.load(RemoteBankConnector.BACKEND_TOKEN_KEY))
+        assertNull(credentials.loadOrNull(discount))
+        assertNull(credentials.loadOrNull(RemoteBankConnector.BACKEND_TOKEN_KEY))
     }
 
     @Test
@@ -224,13 +225,13 @@ class ConnectBankViewModelTest {
         )
 
         // Credentials stored as id -> username, num -> extra, trimmed where appropriate.
-        val creds = assertNotNull(credentials.load(discount))
+        val creds = assertNotNull(credentials.loadOrNull(discount))
         assertEquals("305111111", creds.username)
         assertEquals("s3cret", creds.password)
         assertEquals("42", creds.extra[RemoteBankScraper.NUM_KEY])
 
         // Backend token in the Keystore-backed store under the reserved key.
-        assertEquals("bearer-xyz", credentials.load(RemoteBankConnector.BACKEND_TOKEN_KEY)?.password)
+        assertEquals("bearer-xyz", credentials.loadOrNull(RemoteBankConnector.BACKEND_TOKEN_KEY)?.password)
         // Backend URL in the non-secret config store (trimmed).
         assertEquals("https://host.ts.net:8443", backendConfig.baseUrl())
 
@@ -268,6 +269,33 @@ class ConnectBankViewModelTest {
         assertEquals(ConnectError.OTP_REQUIRED, form.connectError)
         // Exactly one sync attempt — no retry-loop on OTP.
         assertEquals(1, connector.syncCount)
+        assertFalse(viewModel.connected.value == true)
+    }
+
+    @Test
+    fun `discount key-invalidated routes the user to re-enter credentials`() = runTest {
+        // M2-8: a permanently-invalidated credential key (screen lock/biometrics
+        // changed) surfaces as KEY_INVALIDATED. The connect flow classifies it as a
+        // dedicated re-enter-credentials state rather than a generic failure.
+        val connector = FakeConnector(SyncOutcome.Failed(SyncErrorReason.KEY_INVALIDATED, "reconnect"))
+        val viewModel = vm(connectorFor = { connector })
+
+        viewModel.submitDiscount(id = "1", password = "pw", num = "2", backendUrl = "https://x", backendToken = "tok")
+
+        val form = assertIs<ConnectBankUiState.Form>(viewModel.uiState.value)
+        assertEquals(ConnectError.KEY_INVALIDATED, form.connectError)
+        assertFalse(viewModel.connected.value == true)
+    }
+
+    @Test
+    fun `discount auth-required surfaces the unlock-and-retry connect error`() = runTest {
+        val connector = FakeConnector(SyncOutcome.Failed(SyncErrorReason.AUTH_REQUIRED, "unlock"))
+        val viewModel = vm(connectorFor = { connector })
+
+        viewModel.submitDiscount(id = "1", password = "pw", num = "2", backendUrl = "https://x", backendToken = "tok")
+
+        val form = assertIs<ConnectBankUiState.Form>(viewModel.uiState.value)
+        assertEquals(ConnectError.AUTH_REQUIRED, form.connectError)
         assertFalse(viewModel.connected.value == true)
     }
 

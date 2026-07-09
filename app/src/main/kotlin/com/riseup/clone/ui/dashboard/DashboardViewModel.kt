@@ -39,6 +39,7 @@ class DashboardViewModel(
     private val clock: () -> LocalDate = { LocalDate.now() },
     val syncState: StateFlow<SyncState> = AppSync.state,
     private val onResync: suspend () -> Unit = {},
+    private val syncOnOpen: Boolean = false,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<DashboardUiState>(DashboardUiState.Loading)
@@ -57,9 +58,17 @@ class DashboardViewModel(
         viewModelScope.launch {
             syncState.collect { if (it is SyncState.Success) load() }
         }
+        // Foreground on-open sync (M2-8; backend/SECURITY.md §3 refinement 2). Because
+        // the credential key now requires a recent device unlock, sync must run while
+        // the app is in the foreground — here, right after the user unlocked the device
+        // to open it. This replaces the removed periodic background sync. A no-op in
+        // demo/preview mode (syncOnOpen == false) and when nothing is connected.
+        if (syncOnOpen) {
+            viewModelScope.launch { onResync() }
+        }
     }
 
-    /** Trigger a manual re-sync; progress/results surface via [syncState]. */
+    /** Trigger a manual re-sync ("Sync now"); progress/results surface via [syncState]. */
     fun resync() {
         viewModelScope.launch { onResync() }
     }
@@ -153,6 +162,9 @@ class DashboardViewModel(
                         onResync = {
                             connectionStore.connectedInstitution()?.let { connector.runSync(it) }
                         },
+                        // Real mode syncs the connected bank in the foreground on open;
+                        // demo mode shows the seed and never touches the network.
+                        syncOnOpen = !demo,
                     ) as T
                 }
             }

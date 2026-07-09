@@ -2,6 +2,7 @@ package com.riseup.clone.data.security
 
 import com.riseup.clone.domain.scraper.ScraperCredentials
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
@@ -23,17 +24,19 @@ class InMemoryCredentialStoreTest {
     )
 
     @Test
-    fun `save then load returns the same credentials`() = runBlocking {
+    fun `save then load returns Loaded with the same credentials`() = runBlocking {
         val store = InMemoryCredentialStore()
 
         store.save(leumi, creds)
 
-        assertEquals(creds, store.load(leumi))
+        assertEquals(CredentialLoad.Loaded(creds), store.load(leumi))
+        assertEquals(creds, store.loadOrNull(leumi))
     }
 
     @Test
-    fun `load returns null when nothing is stored`() = runBlocking {
-        assertNull(InMemoryCredentialStore().load(leumi))
+    fun `load returns Absent when nothing is stored`() = runBlocking {
+        assertIs<CredentialLoad.Absent>(InMemoryCredentialStore().load(leumi))
+        assertNull(InMemoryCredentialStore().loadOrNull(leumi))
     }
 
     @Test
@@ -44,7 +47,7 @@ class InMemoryCredentialStoreTest {
         val updated = creds.copy(password = "newpass")
         store.save(leumi, updated)
 
-        assertEquals(updated, store.load(leumi))
+        assertEquals(updated, store.loadOrNull(leumi))
     }
 
     @Test
@@ -54,7 +57,8 @@ class InMemoryCredentialStoreTest {
 
         store.clear(leumi)
 
-        assertNull(store.load(leumi))
+        assertIs<CredentialLoad.Absent>(store.load(leumi))
+        assertNull(store.loadOrNull(leumi))
     }
 
     @Test
@@ -67,8 +71,8 @@ class InMemoryCredentialStoreTest {
         store.save(hapoalim, other)
         store.clear(leumi)
 
-        assertNull(store.load(leumi))
-        assertEquals(other, store.load(hapoalim))
+        assertNull(store.loadOrNull(leumi))
+        assertEquals(other, store.loadOrNull(hapoalim))
     }
 
     @Test
@@ -79,7 +83,7 @@ class InMemoryCredentialStoreTest {
 
         store.clearAll()
 
-        assertNull(store.load(leumi))
-        assertNull(store.load("Bank Hapoalim"))
+        assertNull(store.loadOrNull(leumi))
+        assertNull(store.loadOrNull("Bank Hapoalim"))
     }
 }

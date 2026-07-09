@@ -4,6 +4,7 @@ import android.content.Context
 import com.riseup.clone.data.scraper.RemoteBankScraper
 import com.riseup.clone.data.scraper.RemoteScraperConfig
 import com.riseup.clone.data.security.KeystoreCredentialStore
+import com.riseup.clone.data.security.loadOrNull
 import com.riseup.clone.domain.scraper.DateRange
 import java.time.LocalDate
 import kotlinx.coroutines.runBlocking
@@ -58,14 +59,14 @@ class RemoteBankConnector(
             return SyncOutcome.Failed(SyncErrorReason.UNKNOWN, message)
         }
 
-        // First import pulls a wide window; the periodic worker keeps the recent
-        // window fresh. Stable mapper ids make the overlap harmless (rows dedupe).
+        // First import pulls a wide window; subsequent foreground syncs keep the
+        // recent window fresh. Stable mapper ids make the overlap harmless (dedupe).
+        //
+        // M2-8: no periodic background sync is scheduled on success. The credential
+        // key is bound to a recent device unlock (SECURITY.md §3 refinement 2), so a
+        // headless worker can't decrypt; sync runs foreground-only (app-open + manual).
         val outcome = syncer.sync(DateRange(FIRST_IMPORT_FROM, LocalDate.now()))
         AppSync.publish(syncer.state.value)
-
-        if (outcome is SyncOutcome.Synced) {
-            LedgerSyncWorker.schedulePeriodicSync(appContext)
-        }
         return outcome
     }
 
@@ -88,7 +89,7 @@ class RemoteBankConnector(
          */
         fun keystoreTokenProvider(context: Context): () -> String {
             val store = KeystoreCredentialStore(context.applicationContext)
-            return { runBlocking { store.load(BACKEND_TOKEN_KEY)?.password.orEmpty() } }
+            return { runBlocking { store.loadOrNull(BACKEND_TOKEN_KEY)?.password.orEmpty() } }
         }
     }
 }

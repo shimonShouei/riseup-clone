@@ -1,5 +1,7 @@
 package com.riseup.clone.data.sync
 
+import com.riseup.clone.data.security.CredentialLoad
+import com.riseup.clone.data.security.CredentialStore
 import com.riseup.clone.data.security.InMemoryCredentialStore
 import com.riseup.clone.domain.model.Account
 import com.riseup.clone.domain.model.Transaction
@@ -84,10 +86,18 @@ class LedgerSyncerTest {
 
     private fun success() = ScrapeResult.Success(listOf(scrapedAccount()), scrapedTxns())
 
+    /** A [CredentialStore] whose [load] always returns a fixed outcome (never Loaded). */
+    private class FixedLoadStore(private val outcome: CredentialLoad) : CredentialStore {
+        override suspend fun save(institution: String, credentials: ScraperCredentials) = Unit
+        override suspend fun load(institution: String): CredentialLoad = outcome
+        override suspend fun clear(institution: String) = Unit
+        override suspend fun clearAll() = Unit
+    }
+
     private fun syncer(
         scraper: BankScraper,
         store: SyncLedgerStore = FakeStore(),
-        credentials: InMemoryCredentialStore = InMemoryCredentialStore(),
+        credentials: CredentialStore = InMemoryCredentialStore(),
         lastSynced: LastSyncedStore = InMemoryLastSyncedStore(),
     ) = LedgerSyncer(
         scraper = scraper,
@@ -232,6 +242,35 @@ class LedgerSyncerTest {
         assertEquals(SyncErrorReason.NO_CREDENTIALS, failed.reason)
         assertEquals(0, scraper.scrapeCount)
         assertIs<SyncState.Error>(syncer.state.value)
+    }
+
+    @Test
+    fun `auth-required credential outcome fails without scraping and does not retry`() = runTest {
+        // M2-8: the device-unlock-bound key couldn't be decrypted (device not unlocked
+        // recently). Surface AUTH_REQUIRED, never scrape, and don't retry headlessly.
+        val scraper = FakeScraper(institution, success())
+        val syncer = syncer(scraper, credentials = FixedLoadStore(CredentialLoad.AuthRequired))
+
+        val outcome = syncer.sync(range)
+
+        val failed = assertIs<SyncOutcome.Failed>(outcome)
+        assertEquals(SyncErrorReason.AUTH_REQUIRED, failed.reason)
+        assertEquals(0, scraper.scrapeCount)
+        assertEquals(SyncErrorReason.AUTH_REQUIRED, (syncer.state.value as SyncState.Error).reason)
+    }
+
+    @Test
+    fun `key-invalidated credential outcome is a permanent failure without scraping`() = runTest {
+        // M2-8: the credential key was permanently invalidated (lock/biometrics
+        // changed); the stored creds are unrecoverable → KEY_INVALIDATED, no scrape.
+        val scraper = FakeScraper(institution, success())
+        val syncer = syncer(scraper, credentials = FixedLoadStore(CredentialLoad.KeyInvalidated))
+
+        val outcome = syncer.sync(range)
+
+        val failed = assertIs<SyncOutcome.Failed>(outcome)
+        assertEquals(SyncErrorReason.KEY_INVALIDATED, failed.reason)
+        assertEquals(0, scraper.scrapeCount)
     }
 
     @Test

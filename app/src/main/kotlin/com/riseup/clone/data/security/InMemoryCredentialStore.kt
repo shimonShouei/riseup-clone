@@ -13,6 +13,10 @@ import java.util.concurrent.ConcurrentHashMap
  * ever written to disk, there is no at-rest exposure — the secret lives only as
  * long as the process — but for the same reason it must never be used as the real
  * production store.
+ *
+ * It has no key bound to a device unlock, so [load] only ever returns
+ * [CredentialLoad.Loaded] or [CredentialLoad.Absent] — never the locked/invalidated
+ * outcomes only the Keystore-backed store can produce.
  */
 class InMemoryCredentialStore : CredentialStore {
 
@@ -22,7 +26,8 @@ class InMemoryCredentialStore : CredentialStore {
         store[institution] = credentials
     }
 
-    override suspend fun load(institution: String): ScraperCredentials? = store[institution]
+    override suspend fun load(institution: String): CredentialLoad =
+        store[institution]?.let { CredentialLoad.Loaded(it) } ?: CredentialLoad.Absent
 
     override suspend fun clear(institution: String) {
         store.remove(institution)

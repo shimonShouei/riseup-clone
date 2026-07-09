@@ -1,5 +1,6 @@
 package com.riseup.clone.data.sync
 
+import com.riseup.clone.data.security.CredentialLoad
 import com.riseup.clone.data.security.CredentialStore
 import com.riseup.clone.domain.scraper.BankScraper
 import com.riseup.clone.domain.scraper.DateRange
@@ -75,12 +76,29 @@ class LedgerSyncer(
     suspend fun sync(range: DateRange): SyncOutcome = withContext(ioDispatcher) {
         _state.value = SyncState.Syncing
         try {
-            val creds = credentials.load(scraper.institution)
-                ?: return@withContext fail(
+            val creds = when (val load = credentials.load(scraper.institution)) {
+                is CredentialLoad.Loaded -> load.credentials
+                CredentialLoad.Absent -> return@withContext fail(
                     SyncErrorReason.NO_CREDENTIALS,
                     "No stored credentials for ${scraper.institution}",
                     retry = false,
                 )
+                // Unlock-bound key couldn't be used — surface distinctly so the UI can
+                // say "unlock and retry" rather than "disconnected", and don't retry
+                // headlessly (an unattended retry can't unlock the device).
+                CredentialLoad.AuthRequired -> return@withContext fail(
+                    SyncErrorReason.AUTH_REQUIRED,
+                    "Unlock your device to sync ${scraper.institution}",
+                    retry = false,
+                )
+                // Key gone (lock/biometric changed) — the stored creds are lost; the
+                // user must re-connect. Permanent.
+                CredentialLoad.KeyInvalidated -> return@withContext fail(
+                    SyncErrorReason.KEY_INVALIDATED,
+                    "Reconnect ${scraper.institution} to continue",
+                    retry = false,
+                )
+            }
 
             when (val result = scraper.scrape(creds, range)) {
                 is ScrapeResult.Success -> persist(result)

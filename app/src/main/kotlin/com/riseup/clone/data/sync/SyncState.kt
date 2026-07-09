@@ -43,6 +43,21 @@ enum class SyncErrorReason {
     INVALID_CREDENTIALS,
 
     /**
+     * The stored credentials are encrypted under a device-unlock-bound Keystore key
+     * (M2-8) and the device wasn't unlocked recently enough to decrypt them.
+     * Recoverable — the user unlocks the device and retries in the foreground.
+     * Permanent within a headless attempt: retrying without an unlock cannot help.
+     */
+    AUTH_REQUIRED,
+
+    /**
+     * The credential key was permanently invalidated (secure lock screen removed or
+     * biometrics re-enrolled), so the stored credentials are unrecoverable. The user
+     * must re-enter them via the connect flow.
+     */
+    KEY_INVALIDATED,
+
+    /**
      * The bank demands OTP/2FA the unattended backend can't satisfy. Permanent —
      * the sync must surface it and stop rather than retry-loop (SECURITY.md R16).
      */

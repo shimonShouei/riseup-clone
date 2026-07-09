@@ -47,6 +47,18 @@ enum class ConnectError {
     /** The bank rejected the login (wrong id/password/code, or a locked account). */
     INVALID_CREDENTIALS,
 
+    /**
+     * The device-unlock-bound credential key couldn't be used because the device
+     * wasn't unlocked recently enough (M2-8). The user should unlock and retry.
+     */
+    AUTH_REQUIRED,
+
+    /**
+     * The credential key was permanently invalidated (screen lock removed or
+     * biometrics re-enrolled), clearing the saved login — re-enter it to reconnect.
+     */
+    KEY_INVALIDATED,
+
     /** The self-hosted backend couldn't be reached (down, off-VPN, TLS/pin failure). */
     NETWORK,
 

@@ -127,7 +127,15 @@ private fun SyncBanner(syncState: SyncState, onResync: () -> Unit) {
             Text("Syncing…", style = MaterialTheme.typography.labelMedium, color = flow.mutedText)
         }
 
-        SyncState.Idle, is SyncState.Success -> Unit
+        // Idle / success: no banner, but keep the manual foreground "Sync now" action
+        // reachable (background sync is disabled for security — see MainActivity).
+        SyncState.Idle, is SyncState.Success -> Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onResync) { Text("Sync now") }
+        }
     }
 }
 
@@ -135,6 +143,9 @@ private fun SyncBanner(syncState: SyncState, onResync: () -> Unit) {
 private fun SyncErrorReason.message(): String = when (this) {
     SyncErrorReason.NO_CREDENTIALS -> "No bank is connected."
     SyncErrorReason.INVALID_CREDENTIALS -> "Your bank login was rejected. Reconnect to continue."
+    SyncErrorReason.AUTH_REQUIRED -> "Unlock your device, then tap Retry to sync."
+    SyncErrorReason.KEY_INVALIDATED ->
+        "Your device lock or biometrics changed, so your saved login was cleared. Reconnect your bank."
     SyncErrorReason.OTP_REQUIRED -> "Your bank needs 2FA, which isn't supported yet."
     SyncErrorReason.NETWORK -> "Couldn't reach your bank. Check your connection."
     SyncErrorReason.PARSE_ERROR -> "Your bank's data couldn't be read."

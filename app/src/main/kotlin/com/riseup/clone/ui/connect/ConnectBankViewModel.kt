@@ -152,10 +152,11 @@ class ConnectBankViewModel(
         runConnect(RemoteBankScraper.DISCOUNT_INSTITUTION, credentials) {
             // Persist the backend URL first so the connector selected below reads it.
             backendConfig.setBaseUrl(cleanUrl)
-            // M2-7: the backend token and bank credentials are written to the
-            // existing KeystoreCredentialStore as-is. Binding this credential key to
-            // device-unlock (biometric/PIN) + foreground-only sync is a proposed
-            // hardening for M2-7 and is intentionally out of scope here.
+            // The backend token and bank credentials are written to the
+            // KeystoreCredentialStore, whose key is now bound to a recent device
+            // unlock (M2-8; backend/SECURITY.md §3 refinement 2). Saving here runs in
+            // the foreground right after the user unlocked to reach this screen, so
+            // the encrypt succeeds within the key's auth-validity window.
             credentialStore.save(
                 RemoteBankConnector.BACKEND_TOKEN_KEY,
                 ScraperCredentials(username = "", password = backendToken),
@@ -204,6 +205,9 @@ class ConnectBankViewModel(
             reason == SyncErrorReason.OTP_REQUIRED ||
                 message == RemoteBankScraper.OTP_REQUIRED_MESSAGE -> ConnectError.OTP_REQUIRED
             reason == SyncErrorReason.INVALID_CREDENTIALS -> ConnectError.INVALID_CREDENTIALS
+            // Unlock-bound key states (M2-8): "unlock and retry" vs. "re-enter creds".
+            reason == SyncErrorReason.AUTH_REQUIRED -> ConnectError.AUTH_REQUIRED
+            reason == SyncErrorReason.KEY_INVALIDATED -> ConnectError.KEY_INVALIDATED
             reason == SyncErrorReason.NETWORK -> ConnectError.NETWORK
             else -> ConnectError.GENERIC
         }
