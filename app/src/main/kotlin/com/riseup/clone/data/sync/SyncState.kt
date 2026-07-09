@@ -42,6 +42,12 @@ enum class SyncErrorReason {
     /** The bank rejected the stored login. Needs the user to re-authenticate. */
     INVALID_CREDENTIALS,
 
+    /**
+     * The bank demands OTP/2FA the unattended backend can't satisfy. Permanent —
+     * the sync must surface it and stop rather than retry-loop (SECURITY.md R16).
+     */
+    OTP_REQUIRED,
+
     /** Couldn't reach the bank. Transient — worth retrying. */
     NETWORK,
 

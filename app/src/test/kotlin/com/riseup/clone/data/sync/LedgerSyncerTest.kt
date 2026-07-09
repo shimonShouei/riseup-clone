@@ -204,6 +204,23 @@ class LedgerSyncerTest {
     }
 
     @Test
+    fun `otp required is a permanent failure and does not retry-loop`() = runTest {
+        // R16 / T10: an OTP/2FA-required scrape must be permanent (Failed, not Retry)
+        // so the background worker gives up instead of re-attempting an automated
+        // login against a 2FA-gated account.
+        val scraper = FakeScraper(
+            institution,
+            ScrapeResult.Failure(FailureReason.OTP_REQUIRED, "otp_required"),
+        )
+        val syncer = syncer(scraper, credentials = withCreds())
+
+        val outcome = syncer.sync(range)
+
+        val failed = assertIs<SyncOutcome.Failed>(outcome)
+        assertEquals(SyncErrorReason.OTP_REQUIRED, failed.reason)
+    }
+
+    @Test
     fun `missing credentials fails without scraping`() = runTest {
         val scraper = FakeScraper(institution, success())
         // No credentials saved for the institution.

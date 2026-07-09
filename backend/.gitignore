@@ -1,0 +1,16 @@
+# Dependencies & build output
+node_modules/
+dist/
+
+# Secrets — MUST never be committed (SECURITY.md R7)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+certs/
+
+# Logs / misc
+*.log
+npm-debug.log*

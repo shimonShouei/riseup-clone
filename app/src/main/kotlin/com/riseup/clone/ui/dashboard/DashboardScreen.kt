@@ -135,6 +135,7 @@ private fun SyncBanner(syncState: SyncState, onResync: () -> Unit) {
 private fun SyncErrorReason.message(): String = when (this) {
     SyncErrorReason.NO_CREDENTIALS -> "No bank is connected."
     SyncErrorReason.INVALID_CREDENTIALS -> "Your bank login was rejected. Reconnect to continue."
+    SyncErrorReason.OTP_REQUIRED -> "Your bank needs 2FA, which isn't supported yet."
     SyncErrorReason.NETWORK -> "Couldn't reach your bank. Check your connection."
     SyncErrorReason.PARSE_ERROR -> "Your bank's data couldn't be read."
     SyncErrorReason.UNKNOWN -> "Something went wrong. Try again."

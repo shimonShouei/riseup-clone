@@ -1,0 +1,40 @@
+# Local / mesh deployment. Hardened per SECURITY.md.
+#
+# Note on binding vs. publishing (R2): inside its isolated network namespace the
+# container binds 0.0.0.0, but Docker publishes the port ONLY to the host
+# loopback (127.0.0.1) below. For the mesh, change the publish address to the
+# WireGuard/Tailscale interface IP. The service is never on a public port.
+
+services:
+  backend:
+    build: .
+    image: riseup-backend:local
+    restart: unless-stopped
+
+    # --- hardening (R10/R12) ---
+    user: "node" # non-root (R10)
+    read_only: true # immutable root FS (R12)
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL # drop all Linux capabilities (R12)
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      BIND_HOST: 0.0.0.0 # safe here: see the publish note above (R2)
+      PORT: 8443
+      # Provide AUTH_TOKEN via your shell or a local .env file — never commit it.
+      AUTH_TOKEN: ${AUTH_TOKEN:?set AUTH_TOKEN (e.g. in an untracked .env) before up}
+      TLS_CERT_PATH: /run/secrets/tls_cert
+      TLS_KEY_PATH: /run/secrets/tls_key
+      LOG_LEVEL: info
+
+    ports:
+      - "127.0.0.1:8443:8443" # publish to host loopback ONLY (R2)
+
+    volumes:
+      # Mount cert + key read-only; they live on the host (0600, non-root), not
+      # in the image (R7). Generate them per the README.
+      - ./certs/cert.pem:/run/secrets/tls_cert:ro
+      - ./certs/key.pem:/run/secrets/tls_key:ro

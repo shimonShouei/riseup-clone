@@ -117,12 +117,18 @@ class LedgerSyncer(
 
     private fun FailureReason.toSyncReason(): SyncErrorReason = when (this) {
         FailureReason.INVALID_CREDENTIALS -> SyncErrorReason.INVALID_CREDENTIALS
+        FailureReason.OTP_REQUIRED -> SyncErrorReason.OTP_REQUIRED
         FailureReason.NETWORK -> SyncErrorReason.NETWORK
         FailureReason.PARSE_ERROR -> SyncErrorReason.PARSE_ERROR
         FailureReason.UNKNOWN -> SyncErrorReason.UNKNOWN
     }
 
-    /** NETWORK and UNKNOWN are worth another attempt; bad creds / bad payload aren't. */
+    /**
+     * NETWORK and UNKNOWN are worth another attempt; bad creds, a malformed payload,
+     * and OTP/2FA-required are permanent. OTP in particular must NOT retry
+     * (SECURITY.md R16 / T10): an unattended re-login against a 2FA-gated account
+     * only risks an anti-automation lock, so the background worker gives up here.
+     */
     private fun FailureReason.isTransient(): Boolean =
         this == FailureReason.NETWORK || this == FailureReason.UNKNOWN
 }

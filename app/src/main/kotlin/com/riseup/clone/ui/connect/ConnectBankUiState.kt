@@ -16,13 +16,16 @@ sealed interface ConnectBankUiState {
 
     /**
      * The form is editable. Carries a [validationError] (blank/invalid input, set
-     * synchronously on submit) or a [syncError] with its [errorMessage] (a previous
-     * attempt's failed first sync), so the user can fix and retry.
+     * synchronously on submit) or a failed first sync's [syncError] + [errorMessage]
+     * (the raw reason/message, kept for continuity) alongside a UI-level
+     * [connectError] classification, so the screen can show a user-friendly,
+     * case-specific message and the user can fix and retry.
      */
     data class Form(
         val validationError: String? = null,
         val syncError: SyncErrorReason? = null,
         val errorMessage: String? = null,
+        val connectError: ConnectError? = null,
     ) : ConnectBankUiState
 
     /** Credentials saved; the first sync is running. Mirrors [com.riseup.clone.data.sync.SyncState.Syncing]. */
@@ -30,4 +33,26 @@ sealed interface ConnectBankUiState {
 
     /** Connected and first sync done — the app routes to the dashboard. */
     data object Connected : ConnectBankUiState
+}
+
+/**
+ * The user-facing classification of a failed connect attempt. Distilled from the
+ * sync outcome ([SyncErrorReason] + message) into the handful of cases the connect
+ * screen shows distinct copy for. Kept UI-side (not in the sync layer) because it
+ * folds in the OTP case, which the sync layer surfaces only as a stable message
+ * string ([com.riseup.clone.data.scraper.RemoteBankScraper.OTP_REQUIRED_MESSAGE])
+ * rather than its own [SyncErrorReason].
+ */
+enum class ConnectError {
+    /** The bank rejected the login (wrong id/password/code, or a locked account). */
+    INVALID_CREDENTIALS,
+
+    /** The self-hosted backend couldn't be reached (down, off-VPN, TLS/pin failure). */
+    NETWORK,
+
+    /** The account needs OTP/2FA, which the unattended backend can't satisfy yet. */
+    OTP_REQUIRED,
+
+    /** Anything else — a generic, try-again fallback. */
+    GENERIC,
 }

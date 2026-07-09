@@ -124,6 +124,15 @@ enum class FailureReason {
     /** Login rejected (wrong password, locked account, expired session). */
     INVALID_CREDENTIALS,
 
+    /**
+     * The source demands OTP/2FA that an unattended scrape cannot satisfy. Distinct
+     * from [INVALID_CREDENTIALS] (the login itself is fine) and, crucially, a
+     * **permanent** failure: retrying an automated login against a 2FA-gated
+     * account only risks tripping anti-automation locks, so callers must surface it
+     * and stop — never retry-loop (SECURITY.md R16 / T10).
+     */
+    OTP_REQUIRED,
+
     /** Could not reach the bank / statement source. */
     NETWORK,
 
