@@ -62,3 +62,6 @@ Or open the project in Android Studio and run the `app` configuration.
 
 Bank scraping, credential storage (Keystore), networking/backend, multiple accounts,
 transaction editing, notifications.
+
+**Next up is M1 (real bank connection)** — see [NEXT_STEPS.md](NEXT_STEPS.md) for the
+dependency-ordered plan, mirrored in the task list (`TaskList`).

@@ -4,6 +4,7 @@ import com.riseup.clone.domain.model.Cadence
 import com.riseup.clone.domain.model.RecurringItem
 import com.riseup.clone.domain.model.RecurringKind
 import com.riseup.clone.domain.model.Transaction
+import com.riseup.clone.domain.text.MerchantNormalizer
 import java.time.temporal.ChronoUnit
 import kotlin.math.abs
 
@@ -41,16 +42,11 @@ class RecurringDetector(
     }
 
     /**
-     * Normalizes a raw merchant/description string into a clustering key:
-     * lowercase, digits and punctuation stripped, whitespace collapsed.
-     * Handles strings like "SHUFERSAL DEAL 123 TLV" vs "Shufersal Deal 77".
+     * Normalizes a raw merchant/description string into a clustering key.
+     * Delegates to the shared [MerchantNormalizer] so recurring detection and
+     * bank-scraper mapping agree on merchant identity.
      */
-    fun normalizeMerchant(raw: String): String =
-        raw.lowercase()
-            .replace(Regex("[0-9]"), " ")
-            .replace(Regex("[^\\p{L} ]"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
+    fun normalizeMerchant(raw: String): String = MerchantNormalizer.key(raw)
 
     /** Splits one merchant's transactions into clusters of similar amounts. */
     private fun clusterByAmount(group: List<Transaction>): List<List<Transaction>> {

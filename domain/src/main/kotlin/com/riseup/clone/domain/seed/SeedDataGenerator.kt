@@ -1,17 +1,14 @@
 package com.riseup.clone.domain.seed
 
+import com.riseup.clone.domain.model.Account
+import com.riseup.clone.domain.model.AccountType
 import com.riseup.clone.domain.model.Category
+import com.riseup.clone.domain.model.Ledger
 import com.riseup.clone.domain.model.Transaction
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.math.roundToInt
 import kotlin.random.Random
-
-/** A seeded ledger: transaction history plus the balance it implies today. */
-data class SeededLedger(
-    val transactions: List<Transaction>,
-    val currentBalance: Double,
-)
 
 /**
  * Generates ~4 months of realistic fake Israeli-household transactions,
@@ -28,9 +25,14 @@ class SeedDataGenerator(
     private val openingBalance: Double = -650.0,
 ) {
 
-    private val account = "leumi-checking-001"
+    private val account = Account(
+        id = "leumi-checking-001",
+        name = "Cheshbon Over Vashav",
+        institution = "Bank Leumi",
+        type = AccountType.CHECKING,
+    )
 
-    fun generate(today: LocalDate): SeededLedger {
+    fun generate(today: LocalDate): Ledger {
         val rng = Random(seed)
         val start = YearMonth.from(today).minusMonths(historyMonths).atDay(1)
         val txs = mutableListOf<Transaction>()
@@ -39,7 +41,7 @@ class SeedDataGenerator(
             if (date >= start && date < today) {
                 txs += Transaction(
                     id = "seed-${idCounter++}",
-                    accountId = account,
+                    accountId = account.id,
                     date = date,
                     amount = (amount * 100).roundToInt() / 100.0,
                     merchant = merchant,
@@ -67,7 +69,7 @@ class SeedDataGenerator(
 
         txs.sortBy { it.date }
         val currentBalance = openingBalance + txs.sumOf { it.amount }
-        return SeededLedger(txs, currentBalance)
+        return Ledger(accounts = listOf(account), transactions = txs, currentBalance = currentBalance)
     }
 
     private inline fun seedMonthlyFixed(

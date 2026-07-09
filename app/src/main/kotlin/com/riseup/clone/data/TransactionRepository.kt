@@ -1,6 +1,6 @@
 package com.riseup.clone.data
 
-import com.riseup.clone.domain.seed.SeededLedger
+import com.riseup.clone.domain.model.Ledger
 import java.time.LocalDate
 
 /**
@@ -8,5 +8,5 @@ import java.time.LocalDate
  * milestones swap in real bank data behind the same interface.
  */
 interface TransactionRepository {
-    suspend fun loadLedger(today: LocalDate): SeededLedger
+    suspend fun loadLedger(today: LocalDate): Ledger
 }

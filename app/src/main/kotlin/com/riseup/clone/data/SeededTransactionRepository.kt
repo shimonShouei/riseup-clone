@@ -1,7 +1,7 @@
 package com.riseup.clone.data
 
+import com.riseup.clone.domain.model.Ledger
 import com.riseup.clone.domain.seed.SeedDataGenerator
-import com.riseup.clone.domain.seed.SeededLedger
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -11,6 +11,6 @@ class SeededTransactionRepository(
     private val generator: SeedDataGenerator = SeedDataGenerator(),
 ) : TransactionRepository {
 
-    override suspend fun loadLedger(today: LocalDate): SeededLedger =
+    override suspend fun loadLedger(today: LocalDate): Ledger =
         withContext(Dispatchers.Default) { generator.generate(today) }
 }
