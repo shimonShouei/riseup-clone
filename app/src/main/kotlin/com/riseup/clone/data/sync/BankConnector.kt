@@ -4,6 +4,7 @@ import android.content.Context
 import com.riseup.clone.domain.scraper.BankScraper
 import com.riseup.clone.domain.scraper.CsvBankScraper
 import com.riseup.clone.domain.scraper.DateRange
+import com.riseup.clone.domain.scraper.SampleStatementCsv
 import com.riseup.clone.domain.scraper.ScrapedAccount
 import java.time.LocalDate
 
@@ -35,18 +36,18 @@ interface BankConnector {
  * Production [BankConnector] backed by [CsvBankScraper].
  *
  * With only a CSV provider available in M1, "connect a bank" is honestly a
- * *statement import* + credential-capture flow: it reads a bundled sample bank
- * statement ([STATEMENT_ASSET]) and runs it through the exact same seam a live
- * scraper would (raw CSV → [com.riseup.clone.domain.scraper.ScrapeMapper] → Room).
- * Dropping in a real HTTP scraper later is just a different [BankScraper] behind
- * this same connector.
+ * *statement import* + credential-capture flow: it takes a realistic multi-month
+ * sample statement ([SampleStatementCsv]) and runs it through the exact same seam a
+ * live scraper would (raw CSV → [com.riseup.clone.domain.scraper.ScrapeMapper] →
+ * Room). Dropping in a real HTTP scraper later is just a different [BankScraper]
+ * behind this same connector.
  */
 class CsvBankConnector(context: Context) : BankConnector {
 
     private val appContext = context.applicationContext
 
     override fun registerProvider(institution: String) {
-        SyncGraph.scraperProvider = { ctx -> buildScraper(ctx, institution) }
+        SyncGraph.scraperProvider = { buildScraper(institution) }
     }
 
     override suspend fun runSync(institution: String): SyncOutcome {
@@ -71,28 +72,27 @@ class CsvBankConnector(context: Context) : BankConnector {
         return outcome
     }
 
-    private fun buildScraper(ctx: Context, institution: String): BankScraper {
+    private fun buildScraper(institution: String): BankScraper {
         val account = ScrapedAccount(
             externalId = "$institution-checking",
             label = "Checking",
             institution = institution,
             rawType = "checking",
         )
-        return CsvBankScraper(institution, account) { readStatement(ctx) }
+        return CsvBankScraper(institution, account) { statementCsv() }
     }
 
     /**
-     * Yields the raw CSV text. Reads a bundled sample statement; a real build would
-     * point this at a user-picked download or a live fetch. Throwing here surfaces
-     * as [com.riseup.clone.domain.scraper.FailureReason.NETWORK] (a readable error),
+     * Yields the raw CSV text to import. Until a live scraper exists, this is a
+     * realistic multi-month statement synthesized from [SampleStatementCsv] (ending
+     * near today, so the forecast has genuine history to work with). A real build
+     * would instead return a user-picked download or a live fetch; throwing here
+     * would surface as [com.riseup.clone.domain.scraper.FailureReason.NETWORK],
      * exactly as a live source failing to load would.
      */
-    private fun readStatement(ctx: Context): String =
-        ctx.applicationContext.assets.open(STATEMENT_ASSET).bufferedReader().use { it.readText() }
+    private fun statementCsv(): String = SampleStatementCsv.forToday(LocalDate.now())
 
     private companion object {
-        const val STATEMENT_ASSET = "sample_statement.csv"
-
         /** Import everything on the first sync; recurring passes use the 90-day window. */
         val FIRST_IMPORT_FROM: LocalDate = LocalDate.of(2000, 1, 1)
     }
