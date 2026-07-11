@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext (plain HTTP) is permitted so the app can pull a statement from the local
+  scraper CLI's `serve` endpoint (http://<pc-lan-ip>:8788/statement.csv) on the user's
+  own network. targetSdk 35 blocks cleartext by default.
+
+  Why permit it globally rather than scope to LAN ranges: Android's network security
+  config matches <domain> entries by hostname/suffix, NOT by CIDR subnet — there is no
+  way to express "any 192.168.x.y". Since the user types their PC's LAN IP by hand and
+  it varies, a scoped rule cannot cover it. Crucially, this LAN fetch is the ONLY
+  network call the app makes (there is no other backend or HTTPS traffic), so allowing
+  cleartext has no real blast radius here. If a genuine public HTTPS endpoint is ever
+  added, tighten this to a domain-config for that host and flip the base back to false.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

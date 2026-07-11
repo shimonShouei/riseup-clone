@@ -1,0 +1,15 @@
+# Dependencies & build output
+node_modules/
+dist/
+
+# Secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# Bank statements — never commit real financial data
+*.csv
+
+# Logs / misc
+*.log
+npm-debug.log*

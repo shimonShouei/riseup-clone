@@ -7,10 +7,9 @@ import kotlinx.coroutines.withContext
 
 /**
  * [ConnectionStore] backed by a small [SharedPreferences] file. The connected
- * institution name is public metadata (not a secret — the *credentials* live
- * encrypted in [com.riseup.clone.data.security.KeystoreCredentialStore]), so a
- * plain prefs entry is the smallest thing that survives a restart, matching how
- * [com.riseup.clone.data.sync.PreferencesLastSyncedStore] stores its timestamp.
+ * source name is public metadata (there are no secrets in this app — it holds no
+ * bank credentials), so a plain prefs entry is the smallest thing that survives a
+ * restart.
  *
  * I/O runs on [Dispatchers.IO], consistent with the other on-disk stores.
  */

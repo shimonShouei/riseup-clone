@@ -4,20 +4,21 @@ import com.riseup.clone.domain.model.Account
 import com.riseup.clone.domain.model.Transaction
 
 /**
- * The write-side seam the sync orchestrator persists through. Deliberately
- * framework-free (no Room, no Android): it exposes exactly what [LedgerSyncer]
- * needs — read the ids already stored (to dedupe), read the current balance (to
- * refresh it), and apply one batch — so the orchestrator can be unit-tested on
- * the JVM against a trivial in-memory fake instead of a real database.
+ * The write-side seam the statement importer persists through. Deliberately
+ * framework-free (no Room, no Android): it exposes exactly what
+ * [com.riseup.clone.data.importer.LedgerStatementImporter] needs — read the ids
+ * already stored (to dedupe), read the current balance (to refresh it), and apply
+ * one batch — so the importer can be unit-tested on the JVM against a trivial
+ * in-memory fake instead of a real database.
  *
  * The production implementation is [RoomSyncLedgerStore]; tests inject a fake.
  */
 interface SyncLedgerStore {
 
     /**
-     * The ids of every transaction already stored. The orchestrator subtracts
-     * these from a scrape's mapped transactions so a repeat sync over overlapping
-     * history inserts each row at most once.
+     * The ids of every transaction already stored. The importer subtracts these
+     * from a statement's mapped transactions so re-importing overlapping history
+     * inserts each row at most once.
      */
     suspend fun existingTransactionIds(): Set<String>
 
@@ -28,10 +29,10 @@ interface SyncLedgerStore {
     suspend fun currentBalance(): Double
 
     /**
-     * Persist one sync pass: register [accounts], append [newTransactions]
-     * (already deduped by the orchestrator), and set the stored balance to
-     * [newBalance]. Implementations must be idempotent by transaction id and must
-     * leave [newBalance] readable back via [currentBalance].
+     * Persist one import pass: register [accounts], append [newTransactions]
+     * (already deduped by the importer), and set the stored balance to [newBalance].
+     * Implementations must be idempotent by transaction id and must leave
+     * [newBalance] readable back via [currentBalance].
      */
     suspend fun applySync(
         accounts: List<Account>,

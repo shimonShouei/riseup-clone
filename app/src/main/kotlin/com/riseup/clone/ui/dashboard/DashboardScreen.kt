@@ -21,7 +21,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -30,8 +29,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.riseup.clone.data.sync.SyncErrorReason
-import com.riseup.clone.data.sync.SyncState
 import com.riseup.clone.domain.model.ForecastResult
 import com.riseup.clone.domain.model.ProjectedEvent
 import com.riseup.clone.ui.format.formatShekel
@@ -48,25 +45,20 @@ import java.util.Locale
 private val dayMonth = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH)
 
 @Composable
-fun DashboardScreen(viewModel: DashboardViewModel) {
+fun DashboardScreen(viewModel: DashboardViewModel, onRefresh: (() -> Unit)? = null) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val syncState by viewModel.syncState.collectAsStateWithLifecycle()
     when (val s = state) {
         DashboardUiState.Loading -> Box(
             Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) { CircularProgressIndicator() }
 
-        is DashboardUiState.Ready -> Dashboard(s, syncState, onResync = viewModel::resync)
+        is DashboardUiState.Ready -> Dashboard(s, onRefresh)
     }
 }
 
 @Composable
-private fun Dashboard(
-    state: DashboardUiState.Ready,
-    syncState: SyncState,
-    onResync: () -> Unit,
-) {
+private fun Dashboard(state: DashboardUiState.Ready, onRefresh: (() -> Unit)?) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -74,8 +66,7 @@ private fun Dashboard(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { SyncBanner(syncState, onResync) }
-        item { Header(state.today, state.currentBalance) }
+        item { Header(state.today, state.currentBalance, onRefresh) }
         item { HeadlineCard(state.forecast) }
         item { ChartCard(state) }
         item { UpcomingCard(state.forecast.projectedEvents) }
@@ -84,93 +75,35 @@ private fun Dashboard(
     }
 }
 
-/**
- * Sync status surface: a rust error banner with a Retry action when the last sync
- * failed, a subtle progress line while syncing, and nothing when idle/successful
- * (the dashboard content itself is the success signal).
- */
 @Composable
-private fun SyncBanner(syncState: SyncState, onResync: () -> Unit) {
-    val flow = LocalFlowColors.current
-    when (syncState) {
-        is SyncState.Error -> Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(flow.negative.copy(alpha = 0.12f))
-                .padding(start = 14.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Couldn't sync",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = flow.negative,
-                )
-                Text(
-                    syncState.reason.message(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = flow.negative,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            TextButton(onClick = onResync) { Text("Retry") }
-        }
-
-        SyncState.Syncing -> Row(
-            Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(8.dp))
-            Text("Syncing…", style = MaterialTheme.typography.labelMedium, color = flow.mutedText)
-        }
-
-        // Idle / success: no banner, but keep the manual foreground "Sync now" action
-        // reachable (background sync is disabled for security — see MainActivity).
-        SyncState.Idle, is SyncState.Success -> Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onResync) { Text("Sync now") }
-        }
-    }
-}
-
-/** User-facing explanation for why a sync failed. */
-private fun SyncErrorReason.message(): String = when (this) {
-    SyncErrorReason.NO_CREDENTIALS -> "No bank is connected."
-    SyncErrorReason.INVALID_CREDENTIALS -> "Your bank login was rejected. Reconnect to continue."
-    SyncErrorReason.AUTH_REQUIRED -> "Unlock your device, then tap Retry to sync."
-    SyncErrorReason.KEY_INVALIDATED ->
-        "Your device lock or biometrics changed, so your saved login was cleared. Reconnect your bank."
-    SyncErrorReason.OTP_REQUIRED -> "Your bank needs 2FA, which isn't supported yet."
-    SyncErrorReason.NETWORK -> "Couldn't reach your bank. Check your connection."
-    SyncErrorReason.PARSE_ERROR -> "Your bank's data couldn't be read."
-    SyncErrorReason.UNKNOWN -> "Something went wrong. Try again."
-}
-
-@Composable
-private fun Header(today: LocalDate, currentBalance: Double) {
-    Column(Modifier.padding(top = 12.dp, bottom = 2.dp)) {
-        Text(
-            "Your cash flow",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
+private fun Header(today: LocalDate, currentBalance: Double, onRefresh: (() -> Unit)?) {
+    Row(
+        Modifier.padding(top = 12.dp, bottom = 2.dp).fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
             Text(
-                "Balance today  ",
-                style = MaterialTheme.typography.bodyMedium,
-                color = LocalFlowColors.current.mutedText,
-            )
-            Text(
-                formatShekel(currentBalance),
-                style = MoneySmall,
+                "Your cash flow",
+                style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onBackground,
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Balance today  ",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = LocalFlowColors.current.mutedText,
+                )
+                Text(
+                    formatShekel(currentBalance),
+                    style = MoneySmall,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+            }
+        }
+        // Manual refresh: re-fetch the remembered statement URL. Auto-fetch on open
+        // covers the normal case; this is the on-demand path.
+        if (onRefresh != null) {
+            androidx.compose.material3.TextButton(onClick = onRefresh) { Text("Refresh") }
         }
     }
 }

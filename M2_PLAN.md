@@ -1,5 +1,28 @@
 # M2 plan — a *real* bank connection
 
+> **Status (2026-07): superseded — we shipped the local-companion variant (option B),
+> not the self-hosted backend (option A).** The app no longer has any of the
+> networking / backend / on-device bank-credential machinery this plan describes.
+> The current architecture is:
+>
+> - **`scraper-cli/`** — a small local Node CLI you run on your own machine. It uses
+>   `israeli-bank-scrapers` to log into Bank Discount and writes a **CSV statement**.
+>   Credentials live only in that machine's `.env`, in memory for one run; nothing is
+>   printed, logged, or persisted.
+> - **The Android app imports that CSV** (or a bundled sample) through
+>   `StatementImporter` → `ScrapeMapper` → Room. **No backend, no networking from the
+>   phone, no bank credentials stored on the phone, no Keystore credential store, no
+>   background sync.** The first-run screen offers exactly two choices: *Import
+>   statement (CSV)* and *Load sample data*.
+>
+> This removed the option-A pieces that had been built (`RemoteBankScraper`,
+> `RemoteBankConnector`, `BackendConfigStore`, `KeystoreCredentialStore` + the
+> device-unlock key binding, `LedgerSyncer`/`LedgerSyncWorker`/`SyncGraph`, and the
+> OkHttp + kotlinx-serialization deps). The rest of this document is retained as the
+> original design record; the "Recommendation" section below already flagged option D
+> (manual CSV import) as the clean, credential-free path, and B as the tinkerer path —
+> the shipped design is B feeding D's importer.
+
 M1 built the data pipeline (persistence, scraper boundary, credentials, sync,
 connect UI) but the only data source is a synthetic sample. This plan is about
 the thing that's actually missing: pulling a user's real transactions.

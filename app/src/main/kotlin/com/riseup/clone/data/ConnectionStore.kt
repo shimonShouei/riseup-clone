@@ -1,25 +1,20 @@
 package com.riseup.clone.data
 
 /**
- * Persists *which* bank the household has connected — the single source of truth
- * for the "am I connected?" question the app's start destination hinges on.
+ * Persists *which* source the household has connected — the single source of truth
+ * for the "am I set up?" question the app's start destination hinges on.
  *
- * Split behind an interface for the same reason [com.riseup.clone.data.security.CredentialStore]
- * and [com.riseup.clone.data.sync.LastSyncedStore] are: the production impl
- * ([PreferencesConnectionStore]) touches Android (SharedPreferences), while
- * [InMemoryConnectionStore] lets the connect-bank decision logic be unit-tested on
- * the JVM without a device.
+ * Split behind an interface so the production impl ([PreferencesConnectionStore])
+ * can touch Android (SharedPreferences) while [InMemoryConnectionStore] lets the
+ * first-run decision logic be unit-tested on the JVM without a device.
  *
- * Why a dedicated flag rather than "does [CredentialStore] have a secret?": the
- * credential store is keyed by institution and cannot *enumerate* institutions, so
- * on a cold start there'd be no way to learn which bank to re-register the scraper
- * for. Recording the connected institution name here answers both "connected?" and
- * "connected to what?" in one read. Only set once the *first sync succeeds*, so a
- * saved-but-never-synced attempt doesn't route the user past onboarding.
+ * Recording the connected source name answers both "set up?" and "set up as what?"
+ * in one read. Only set once a statement import *succeeds*, so an abandoned/failed
+ * import doesn't route the user past onboarding.
  */
 interface ConnectionStore {
 
-    /** The connected institution's name, or `null` if no bank is connected. */
+    /** The connected source's name, or `null` if nothing is connected. */
     suspend fun connectedInstitution(): String?
 
     /** Mark [institution] as connected (survives restarts). */

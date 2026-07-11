@@ -4,256 +4,246 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.riseup.clone.data.BackendConfigStore
 import com.riseup.clone.data.ConnectionStore
-import com.riseup.clone.data.PreferencesBackendConfigStore
+import com.riseup.clone.data.InMemoryScraperUrlStore
 import com.riseup.clone.data.PreferencesConnectionStore
-import com.riseup.clone.data.scraper.RemoteBankScraper
-import com.riseup.clone.data.scraper.RemoteScraperConfig
-import com.riseup.clone.data.security.CredentialStore
-import com.riseup.clone.data.security.KeystoreCredentialStore
-import com.riseup.clone.data.sync.BankConnector
-import com.riseup.clone.data.sync.CsvBankConnector
-import com.riseup.clone.data.sync.RemoteBankConnector
-import com.riseup.clone.data.sync.SyncErrorReason
-import com.riseup.clone.data.sync.SyncOutcome
-import com.riseup.clone.domain.scraper.ScraperCredentials
+import com.riseup.clone.data.PreferencesScraperUrlStore
+import com.riseup.clone.data.ScraperUrlStore
+import com.riseup.clone.data.importer.ImportResult
+import com.riseup.clone.data.importer.LedgerStatementImporter
+import com.riseup.clone.data.importer.StatementImporter
+import com.riseup.clone.data.local.LedgerDatabase
+import com.riseup.clone.data.remote.CsvFetchException
+import com.riseup.clone.data.remote.CsvFetcher
+import com.riseup.clone.data.remote.HttpUrlConnectionCsvFetcher
+import com.riseup.clone.data.sync.AppSync
+import com.riseup.clone.data.sync.RoomSyncLedgerStore
+import com.riseup.clone.data.sync.SyncState
+import com.riseup.clone.domain.scraper.SampleStatementCsv
+import java.time.Instant
+import java.time.LocalDate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Decision logic for the connect-bank onboarding flow, deliberately expressed over
- * interfaces ([CredentialStore], [ConnectionStore], [BackendConfigStore], and a
- * [BankConnector] selector) so every branch is unit-testable on the JVM with the
- * in-memory fakes — no Compose, Room, or Keystore needed. The composable is a thin
- * state-in / events-out shell.
+ * Decision logic for the first-run "connect your data" screen. There is no live
+ * bank connection, no networking, and no stored bank credentials anymore — the app
+ * gets real transactions by importing a CSV statement (produced by the user's bank
+ * export or the local `scraper-cli/`). This ViewModel drives two independent paths,
+ * both of which land rows in the same Room ledger the dashboard reads:
  *
- * On submit: validate → save credentials (and, for the remote path, the backend
- * URL + bearer token) → run the first sync through the connector chosen for the
- * institution → surface the outcome. Only a *successful* first sync flips the
- * persistent connected flag, so a saved-but-unsynced attempt can't route the user
- * past onboarding.
+ * 1. **Import statement (CSV)** — the real path: raw text the user picked from a
+ *    file, run through [StatementImporter].
+ * 2. **Statement URL (cloud or LAN)** — the same real path, but the CSV text is pulled
+ *    over HTTPS/HTTP from any URL ([CsvFetcher]) — the scraper's cloud upload (Dropbox)
+ *    or its LAN `serve` endpoint — then fed through the *same* importer. The URL is
+ *    remembered via [ScraperUrlStore] and entered ONCE; thereafter it is fetched
+ *    automatically on every app open (see [init]/[refreshFromSavedUrl]).
+ * 3. **Load sample data** — the demo path: a realistic multi-month sample statement
+ *    ([SampleStatementCsv]) fed through the *same* importer.
  *
- * ### Two connect paths
- * - **Bank Discount** connects through the live [RemoteBankConnector] (self-hosted
- *   backend, pinned HTTPS): three real login fields (`id` / `password` / `num`)
- *   plus a backend URL and bearer token.
- * - **Every other institution** keeps the existing sample/CSV path via
- *   [CsvBankConnector].
+ * Auto-fetch on open: if a statement URL is remembered, the ViewModel fetches and
+ * imports it in the background at launch, so the normal case needs no button press.
+ * A first successful fetch persists the connection (via [ConnectionStore]) so later
+ * restarts route straight to the dashboard and auto-refresh.
  *
- * The connector is picked by institution behind the [connectorFor] seam, so this
- * class stays interface-based and a fake connector drops in for tests.
+ * The logic is expressed over interfaces ([ConnectionStore], [StatementImporter])
+ * so every branch is unit-testable on the JVM with in-memory fakes — no Compose or
+ * Room needed. The composable is a thin state-in / events-out shell.
+ *
+ * On a successful import (real or sample) we persist the connection via
+ * [ConnectionStore], so a cold restart routes straight to the dashboard, and publish
+ * an [AppSync] success so an already-open dashboard reloads.
  *
  * [connected] is the app-level routing signal (see MainActivity): `null` while the
  * launch check is in flight, `true` → dashboard, `false` → show this screen. It is
- * derived from [ConnectionStore] so it persists across restarts; on a connected
- * cold start we also re-register the scraper provider (it lives in process memory).
+ * derived from [ConnectionStore] so it persists across restarts.
  */
 class ConnectBankViewModel(
-    private val credentialStore: CredentialStore,
     private val connectionStore: ConnectionStore,
-    private val backendConfig: BackendConfigStore,
-    private val connectorFor: (institution: String) -> BankConnector,
+    private val statementImporter: StatementImporter,
+    private val sampleCsv: () -> String = { SampleStatementCsv.forToday(LocalDate.now()) },
+    private val clock: () -> Instant = Instant::now,
+    private val csvFetcher: CsvFetcher = HttpUrlConnectionCsvFetcher(),
+    private val scraperUrlStore: ScraperUrlStore = InMemoryScraperUrlStore(),
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow<ConnectBankUiState>(ConnectBankUiState.Form())
-    val uiState: StateFlow<ConnectBankUiState> = _uiState.asStateFlow()
-
-    /** null = still determining at launch, true = go to dashboard, false = show connect form. */
+    /** null = still determining at launch, true = go to dashboard, false = show connect screen. */
     private val _connected = MutableStateFlow<Boolean?>(null)
     val connected: StateFlow<Boolean?> = _connected.asStateFlow()
 
+    /** Phase of the file-import action. */
+    private val _importState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
+    val importState: StateFlow<ImportUiState> = _importState.asStateFlow()
+
+    /** Phase of the fetch-from-scraper action (independent of the file import). */
+    private val _fetchState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
+    val fetchState: StateFlow<ImportUiState> = _fetchState.asStateFlow()
+
+    /** Last-used scraper URL, prefilled into the fetch field (empty until first fetch). */
+    private val _savedScraperUrl = MutableStateFlow("")
+    val savedScraperUrl: StateFlow<String> = _savedScraperUrl.asStateFlow()
+
+    /** Phase of the load-sample-data action (independent of the file import). */
+    private val _sampleState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
+    val sampleState: StateFlow<ImportUiState> = _sampleState.asStateFlow()
+
     init {
         viewModelScope.launch {
-            val institution = connectionStore.connectedInstitution()
-            if (institution != null) {
-                // Re-establish the in-memory scraper provider so background and
-                // manual syncs work after a cold start — using the same connector
-                // (CSV vs. remote) this institution was connected through.
-                connectorFor(institution).registerProvider(institution)
-                _connected.value = true
-            } else {
-                _connected.value = false
-            }
-        }
-    }
-
-    /**
-     * Attempt to connect [institution] with [username]/[password] via the sample/CSV
-     * path (every institution except Bank Discount). Blank fields are rejected
-     * synchronously; otherwise credentials are saved and the first sync runs.
-     */
-    fun submit(institution: String, username: String, password: String) {
-        val bank = institution.trim()
-        val user = username.trim()
-        val validationError = when {
-            bank.isEmpty() -> "Choose your bank"
-            user.isEmpty() -> "Enter your username"
-            password.isEmpty() -> "Enter your password"
-            else -> null
-        }
-        if (validationError != null) {
-            _uiState.value = ConnectBankUiState.Form(validationError = validationError)
-            return
-        }
-
-        runConnect(bank, ScraperCredentials(user, password))
-    }
-
-    /**
-     * Attempt to connect **Bank Discount** through the remote backend. Captures the
-     * bank's three real login fields ([id] = ת״ז/user ID, [password], [num] =
-     * קוד משתמש/user code) plus the [backendUrl] (non-secret) and [backendToken]
-     * (secret). All are validated non-blank before anything is saved or synced.
-     *
-     * Storage (all reused, no new crypto path):
-     * - Credentials → [CredentialStore] under the institution as
-     *   `ScraperCredentials(username = id, password = password, extra = {num})`,
-     *   exactly the shape [RemoteBankScraper] reads.
-     * - Backend token → the Keystore-backed [CredentialStore] under the reserved
-     *   [RemoteBankConnector.BACKEND_TOKEN_KEY] (never plain prefs / BuildConfig).
-     * - Backend URL → the non-secret [BackendConfigStore].
-     */
-    fun submitDiscount(
-        id: String,
-        password: String,
-        num: String,
-        backendUrl: String,
-        backendToken: String,
-    ) {
-        val cleanId = id.trim()
-        val cleanNum = num.trim()
-        val cleanUrl = backendUrl.trim()
-        val validationError = when {
-            cleanId.isEmpty() -> "Enter your ת\"ז (user ID)"
-            password.isEmpty() -> "Enter your password"
-            cleanNum.isEmpty() -> "Enter your קוד משתמש (user code)"
-            cleanUrl.isEmpty() -> "Enter your backend URL"
-            // R3: the backend MUST be reached over HTTPS. Reject a cleartext URL up
-            // front — over http:// there is no TLS, so certificate pinning (R13) is
-            // never applied and credentials would be sent in the clear.
-            !cleanUrl.startsWith("https://", ignoreCase = true) ->
-                "Backend URL must start with https://"
-            backendToken.isEmpty() -> "Enter your backend token"
-            else -> null
-        }
-        if (validationError != null) {
-            _uiState.value = ConnectBankUiState.Form(validationError = validationError)
-            return
-        }
-
-        val credentials = ScraperCredentials(
-            username = cleanId,
-            password = password,
-            extra = mapOf(RemoteBankScraper.NUM_KEY to cleanNum),
-        )
-        runConnect(RemoteBankScraper.DISCOUNT_INSTITUTION, credentials) {
-            // Persist the backend URL first so the connector selected below reads it.
-            backendConfig.setBaseUrl(cleanUrl)
-            // The backend token and bank credentials are written to the
-            // KeystoreCredentialStore, whose key is now bound to a recent device
-            // unlock (M2-8; backend/SECURITY.md §3 refinement 2). Saving here runs in
-            // the foreground right after the user unlocked to reach this screen, so
-            // the encrypt succeeds within the key's auth-validity window.
-            credentialStore.save(
-                RemoteBankConnector.BACKEND_TOKEN_KEY,
-                ScraperCredentials(username = "", password = backendToken),
-            )
-        }
-    }
-
-    /**
-     * Shared connect pipeline: move to Syncing, run any [preSync] side effects
-     * (remote path saves URL + token), save the bank credentials, run the first
-     * sync via the connector chosen for [institution], and surface the outcome.
-     */
-    private fun runConnect(
-        institution: String,
-        credentials: ScraperCredentials,
-        preSync: suspend () -> Unit = {},
-    ) {
-        viewModelScope.launch {
-            _uiState.value = ConnectBankUiState.Syncing
-            preSync()
-            credentialStore.save(institution, credentials)
-
-            _uiState.value = when (val outcome = connectorFor(institution).runSync(institution)) {
-                is SyncOutcome.Synced -> {
-                    connectionStore.setConnected(institution)
+            val alreadyConnected = connectionStore.connectedInstitution() != null
+            val saved = scraperUrlStore.savedUrl().orEmpty()
+            _savedScraperUrl.value = saved
+            when {
+                // No remembered URL: route by the persisted connection, prompt on first run.
+                saved.isBlank() -> _connected.value = alreadyConnected
+                // Already connected: show the dashboard now and refresh it in the background.
+                alreadyConnected -> {
                     _connected.value = true
-                    ConnectBankUiState.Connected
+                    fetchAndImport(saved, routeOnResult = false)
                 }
-                is SyncOutcome.Retry -> errorState(outcome.reason, outcome.message)
-                is SyncOutcome.Failed -> errorState(outcome.reason, outcome.message)
+                // Remembered URL but not yet connected: try it seamlessly. Stay on the
+                // launch spinner (connected == null) until the auto-fetch resolves, then
+                // route in on success or fall back to the connect screen on failure.
+                else -> fetchAndImport(saved, routeOnResult = true)
             }
         }
     }
 
     /**
-     * Classify a failed sync into the user-facing [ConnectError] the screen renders.
-     *
-     * OTP/2FA maps to the dedicated [SyncErrorReason.OTP_REQUIRED] (M2-5 maps the
-     * backend's 409 to `Failure(OTP_REQUIRED, …)`, a permanent failure). We surface a
-     * distinct OTP state and do NOT re-run the sync: `runConnect` is a one-shot user
-     * action, so simply returning the state (never re-invoking sync) is what "don't
-     * retry-loop on OTP" means (R16). The message check is a defensive fallback.
+     * Import a bank statement CSV the user picked from a file. Runs the raw text
+     * through the same scrape → map → store pipeline the sample path uses (see
+     * [StatementImporter]); de-dupe by stable id means re-importing the same file
+     * doesn't double-count. On success we persist the connection and publish an
+     * [AppSync] success so an already-open dashboard reloads, then surface the count.
      */
-    private fun errorState(reason: SyncErrorReason, message: String): ConnectBankUiState.Form {
-        val connectError = when {
-            reason == SyncErrorReason.OTP_REQUIRED ||
-                message == RemoteBankScraper.OTP_REQUIRED_MESSAGE -> ConnectError.OTP_REQUIRED
-            reason == SyncErrorReason.INVALID_CREDENTIALS -> ConnectError.INVALID_CREDENTIALS
-            // Unlock-bound key states (M2-8): "unlock and retry" vs. "re-enter creds".
-            reason == SyncErrorReason.AUTH_REQUIRED -> ConnectError.AUTH_REQUIRED
-            reason == SyncErrorReason.KEY_INVALIDATED -> ConnectError.KEY_INVALIDATED
-            reason == SyncErrorReason.NETWORK -> ConnectError.NETWORK
-            else -> ConnectError.GENERIC
+    fun importStatement(csvText: String, institution: String = IMPORTED_INSTITUTION) {
+        viewModelScope.launch {
+            _importState.value = ImportUiState.Importing
+            _importState.value = runImport(csvText, institution)
         }
-        return ConnectBankUiState.Form(
-            syncError = reason,
-            errorMessage = message,
-            connectError = connectError,
-        )
+    }
+
+    /**
+     * Fetch a statement CSV from [url] (a cloud upload URL or a LAN `serve` URL) and run
+     * it through the *same* importer the file path uses. Manual entry from the connect
+     * screen: on success we persist the connection but wait for the explicit "View my
+     * dashboard" tap, exactly like the file import ([routeOnResult] = false).
+     */
+    fun fetchFromScraper(url: String) {
+        fetchAndImport(url, routeOnResult = false)
+    }
+
+    /**
+     * Re-fetch and import the remembered statement URL on demand (the manual "Refresh").
+     * A no-op if no URL is remembered yet. Runs in the background and, on success,
+     * publishes an [AppSync] refresh so an open dashboard reloads; it never changes the
+     * screen the user is on.
+     */
+    fun refreshFromSavedUrl() {
+        val saved = _savedScraperUrl.value
+        if (saved.isBlank()) return
+        fetchAndImport(saved, routeOnResult = false)
+    }
+
+    /**
+     * Shared fetch → import pipeline for the URL source. The URL is remembered
+     * ([ScraperUrlStore]) — even on failure — so it prefills next time and the user only
+     * types it once. A fetch failure surfaces as an [ImportUiState.Error] and no import
+     * is attempted.
+     *
+     * [routeOnResult] governs launch-time auto-fetch only: when true (remembered URL, not
+     * yet connected), a successful import routes into the dashboard and a failure falls
+     * back to the connect screen. When false (manual fetch/refresh, or a background
+     * refresh of an already-connected app), the current screen is left untouched.
+     */
+    private fun fetchAndImport(url: String, routeOnResult: Boolean) {
+        viewModelScope.launch {
+            val trimmed = url.trim()
+            _fetchState.value = ImportUiState.Importing
+            // Remember the endpoint regardless of outcome so a retry is one tap away.
+            _savedScraperUrl.value = trimmed
+            scraperUrlStore.saveUrl(trimmed)
+            val csvText = try {
+                csvFetcher.fetchCsv(trimmed)
+            } catch (e: CsvFetchException) {
+                _fetchState.value = ImportUiState.Error(e.userMessage)
+                if (routeOnResult) _connected.value = false
+                return@launch
+            }
+            val outcome = runImport(csvText, SCRAPER_INSTITUTION)
+            _fetchState.value = outcome
+            if (routeOnResult) _connected.value = outcome is ImportUiState.Success
+        }
+    }
+
+    /**
+     * Load the bundled multi-month sample statement (the demo path). Feeds
+     * [SampleStatementCsv] through the same importer, persists the connection, and
+     * routes straight to the dashboard on success.
+     */
+    fun loadSample() {
+        viewModelScope.launch {
+            _sampleState.value = ImportUiState.Importing
+            when (val outcome = runImport(sampleCsv(), SAMPLE_INSTITUTION)) {
+                is ImportUiState.Success -> {
+                    _sampleState.value = outcome
+                    _connected.value = true
+                }
+                else -> _sampleState.value = outcome
+            }
+        }
+    }
+
+    /** Shared import pipeline: import → on success persist connection + publish refresh. */
+    private suspend fun runImport(csvText: String, institution: String): ImportUiState =
+        when (val result = statementImporter.import(csvText, institution)) {
+            is ImportResult.Imported -> {
+                connectionStore.setConnected(institution)
+                // Shared refresh signal: a live dashboard reloads the ledger on Success.
+                AppSync.publish(SyncState.Success(clock()))
+                ImportUiState.Success(result.newTransactions)
+            }
+            is ImportResult.Failed -> ImportUiState.Error(result.message)
+        }
+
+    /** Surface a file that couldn't be read (unreadable Uri / decode failure) as an import error. */
+    fun reportImportError(message: String) {
+        _importState.value = ImportUiState.Error(message)
+    }
+
+    /** Route into the dashboard after a successful file import. */
+    fun continueToDashboard() {
+        _connected.value = true
     }
 
     companion object {
-        /** Builds a ViewModel wired to the real on-device stores + connector selection. */
+        /** Institution name recorded for a user-imported statement. */
+        const val IMPORTED_INSTITUTION = "Imported statement"
+
+        /** Institution name recorded for the bundled sample/demo statement. */
+        const val SAMPLE_INSTITUTION = "Sample data"
+
+        /** Institution name recorded for a statement fetched from a URL (cloud or LAN). */
+        const val SCRAPER_INSTITUTION = "Scraper"
+
+        /** Builds a ViewModel wired to the real on-device stores. */
         fun factory(context: Context): ViewModelProvider.Factory {
             val app = context.applicationContext
-            val backendConfig = PreferencesBackendConfigStore(app)
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
                     ConnectBankViewModel(
-                        credentialStore = KeystoreCredentialStore(app),
                         connectionStore = PreferencesConnectionStore(app),
-                        backendConfig = backendConfig,
-                        connectorFor = { institution -> connectorForInstitution(app, backendConfig, institution) },
+                        // Imports land in the same Room ledger the dashboard reads.
+                        statementImporter = LedgerStatementImporter(
+                            RoomSyncLedgerStore(LedgerDatabase.build(app).ledgerDao()),
+                        ),
+                        csvFetcher = HttpUrlConnectionCsvFetcher(),
+                        scraperUrlStore = PreferencesScraperUrlStore(app),
                     ) as T
             }
         }
-
-        /**
-         * Route Bank Discount through the live [RemoteBankConnector] (with the
-         * user-provided base URL layered onto the compiled-in, non-secret pins) and
-         * every other institution through the sample/CSV [CsvBankConnector]. The
-         * bearer token is NOT passed here — [RemoteBankConnector] reads it from the
-         * Keystore under [RemoteBankConnector.BACKEND_TOKEN_KEY].
-         */
-        private fun connectorForInstitution(
-            context: Context,
-            backendConfig: BackendConfigStore,
-            institution: String,
-        ): BankConnector =
-            if (institution == RemoteBankScraper.DISCOUNT_INSTITUTION) {
-                // Pins stay fixed in RemoteScraperConfig (real values dropped in with
-                // the cert); only the non-secret base URL is user-supplied.
-                val baseUrl = backendConfig.baseUrl() ?: RemoteScraperConfig.PLACEHOLDER.baseUrl
-                RemoteBankConnector(context, RemoteScraperConfig.PLACEHOLDER.copy(baseUrl = baseUrl))
-            } else {
-                CsvBankConnector(context)
-            }
     }
 }

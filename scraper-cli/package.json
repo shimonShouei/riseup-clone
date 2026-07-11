@@ -1,0 +1,33 @@
+{
+  "name": "discount-scraper-cli",
+  "version": "0.1.0",
+  "description": "Local command-line scraper for Bank Discount. Runs israeli-bank-scrapers headless and writes a CSV statement the RiseUp-clone Android app imports. No server, no auth, no network to the phone.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "bin": {
+    "discount-scrape": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "serve": "node dist/main.js serve",
+    "upload": "node dist/main.js upload",
+    "dev": "tsx src/main.ts",
+    "dev:serve": "tsx src/main.ts serve",
+    "dev:upload": "tsx src/main.ts upload",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "israeli-bank-scrapers": "6.8.0",
+    "puppeteer": "24.43.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.10",
+    "tsx": "4.19.2",
+    "typescript": "5.7.3",
+    "vitest": "3.2.7"
+  }
+}

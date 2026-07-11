@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.riseup.clone.data.sync.LedgerSyncWorker
 import com.riseup.clone.ui.connect.ConnectBankScreen
 import com.riseup.clone.ui.connect.ConnectBankViewModel
 import com.riseup.clone.ui.dashboard.DashboardScreen
@@ -23,13 +22,14 @@ import com.riseup.clone.ui.theme.RiseUpTheme
 
 /**
  * Single-activity host. Start destination is a minimal state hoist (no nav library):
- * [ConnectBankViewModel.connected] decides between the connect-bank onboarding and
- * the dashboard, and persists across restarts (backed by
- * [com.riseup.clone.data.ConnectionStore]).
+ * [ConnectBankViewModel.connected] decides between the first-run "set up your cash
+ * flow" screen and the dashboard, and persists across restarts (backed by
+ * [com.riseup.clone.data.ConnectionStore]). A connection is established by importing
+ * a CSV statement (or loading the sample) — there is no live bank sync.
  *
  * Demo/seeded mode ([demoMode]) short-circuits onboarding and shows the dashboard
  * off the in-memory seed — kept reachable (debug builds only) so the seeded hero
- * visual can be previewed without connecting a bank.
+ * visual can be previewed without importing anything.
  */
 class MainActivity : ComponentActivity() {
 
@@ -45,15 +45,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // Security (M2-8; backend/SECURITY.md §3 refinement 2): background sync is
-        // DISABLED. The credential key is bound to a recent device unlock, so a
-        // headless worker can no longer decrypt the bank credentials / bearer token —
-        // it would only fail or auth-prompt unattended. Sync is foreground-only: it
-        // runs on app open (DashboardViewModel triggers a foreground sync in its init,
-        // right after the user unlocked to open the app) and via the manual "Sync now"
-        // / resync action. Here we only cancel any periodic work an older build left
-        // enqueued.
-        LedgerSyncWorker.cancelPeriodicSync(applicationContext)
 
         setContent {
             RiseUpTheme {
@@ -69,7 +60,10 @@ class MainActivity : ComponentActivity() {
                             null -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                                 CircularProgressIndicator()
                             }
-                            true -> DashboardScreen(dashboardViewModel)
+                            true -> DashboardScreen(
+                                dashboardViewModel,
+                                onRefresh = connectViewModel::refreshFromSavedUrl,
+                            )
                             false -> ConnectBankScreen(connectViewModel)
                         }
                     }

@@ -58,10 +58,20 @@ Or open the project in Android Studio and run the `app` configuration.
 - `:app:assembleDebug` — builds successfully (`app/build/outputs/apk/debug/app-debug.apk`).
 - Not verified on a device/emulator (no emulator available on this machine).
 
-## Later milestones (explicitly out of M0 scope)
+## Since M0 — real transactions via CSV import
 
-Bank scraping, credential storage (Keystore), networking/backend, multiple accounts,
-transaction editing, notifications.
+The app now imports **real** transactions, with **no backend, no networking, and no
+bank credentials stored on the phone**:
 
-**Next up is M1 (real bank connection)** — see [NEXT_STEPS.md](NEXT_STEPS.md) for the
-dependency-ordered plan, mirrored in the task list (`TaskList`).
+- **`scraper-cli/`** — a small local Node CLI you run on your own machine. It scrapes
+  Bank Discount (`israeli-bank-scrapers`) and writes a **CSV statement**; credentials
+  live only in that machine's `.env`, in memory for a single run. See
+  [`scraper-cli/README.md`](scraper-cli/README.md).
+- **The app imports that CSV** (or a bundled sample) through `StatementImporter` →
+  `ScrapeMapper` → Room, feeding the same forecast engine. The first-run screen offers
+  *Import statement (CSV)* and *Load sample data*.
+
+An earlier self-hosted-backend design (remote scraper over pinned HTTPS + Android
+Keystore credentials + WorkManager background sync) was built and then removed in
+favour of this simpler, credential-free local-import model — see
+[M2_PLAN.md](M2_PLAN.md) and [NEXT_STEPS.md](NEXT_STEPS.md) for the history.

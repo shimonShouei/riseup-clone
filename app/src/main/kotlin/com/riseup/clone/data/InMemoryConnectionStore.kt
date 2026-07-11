@@ -3,11 +3,9 @@ package com.riseup.clone.data
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Non-persistent [ConnectionStore] holding the connected institution only in
- * process memory. The JVM-testable fake (mirrors
- * [com.riseup.clone.data.security.InMemoryCredentialStore]) and a safe stand-in for
- * previews; never the production store, since it forgets the value when the process
- * dies.
+ * Non-persistent [ConnectionStore] holding the connected source only in process
+ * memory. The JVM-testable fake and a safe stand-in for previews; never the
+ * production store, since it forgets the value when the process dies.
  */
 class InMemoryConnectionStore(initial: String? = null) : ConnectionStore {
 
