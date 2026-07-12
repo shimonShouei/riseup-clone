@@ -70,10 +70,21 @@ export function toDirectDownloadUrl(sharedUrl: string): string {
 
 /**
  * Map a Dropbox HTTP status to a clear, actionable, secret-free message. We never
- * echo the raw response body (it can reflect the request) — only the status drives
- * the message.
+ * echo the raw response `body` — but we may scan it for a known error signature
+ * (e.g. a missing OAuth scope, which Dropbox reports as a 400, not a 403) so the
+ * message points at the real cause instead of guessing. Only fixed strings we own
+ * are ever returned; nothing from the body is forwarded.
  */
-export function mapDropboxError(status: number): string {
+export function mapDropboxError(status: number, body?: string): string {
+  // A missing scope surfaces as a 400 on the content endpoint with this phrasing;
+  // detect it regardless of status so the message names the actual fix.
+  if (body && /required scope|missing_scope/i.test(body)) {
+    return (
+      "Dropbox rejected the request: your Dropbox app is missing a required scope. " +
+      "In the Dropbox App Console, enable 'files.content.write' and 'sharing.write', " +
+      "then regenerate DROPBOX_TOKEN (scope changes need a fresh token) and update .env."
+    );
+  }
   switch (status) {
     case 400:
       return "Dropbox rejected the request (400). Check DROPBOX_PATH is a valid absolute path.";
@@ -118,7 +129,7 @@ export class DropboxUploader implements Uploader {
       body: req.content,
     });
     if (!res.ok) {
-      throw new Error(mapDropboxError(res.status));
+      throw new Error(mapDropboxError(res.status, await res.text()));
     }
   }
 
@@ -144,7 +155,7 @@ export class DropboxUploader implements Uploader {
     if (created.status === 409) {
       return this.existingSharedLink();
     }
-    throw new Error(mapDropboxError(created.status));
+    throw new Error(mapDropboxError(created.status, await created.text()));
   }
 
   /** Fetch the already-created shared link for the fixed path. */
@@ -158,7 +169,7 @@ export class DropboxUploader implements Uploader {
       body: JSON.stringify({ path: this.config.path, direct_only: true }),
     });
     if (!res.ok) {
-      throw new Error(mapDropboxError(res.status));
+      throw new Error(mapDropboxError(res.status, await res.text()));
     }
     const data = (await res.json()) as { links?: Array<{ url?: string }> };
     const url = data.links?.[0]?.url;

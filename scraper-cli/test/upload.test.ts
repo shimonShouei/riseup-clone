@@ -197,4 +197,16 @@ describe("mapDropboxError", () => {
     expect(mapDropboxError(500)).toContain("server error");
     expect(mapDropboxError(418)).toContain("HTTP 418");
   });
+
+  it("detects a missing-scope 400 from the body and names the real fix", () => {
+    const body =
+      'Error in call to API function "files/upload": Your app (ID: 123) is not ' +
+      "permitted to access this endpoint because it does not have the required " +
+      "scope 'files.content.write'.";
+    const msg = mapDropboxError(400, body);
+    expect(msg).toContain("files.content.write");
+    expect(msg).toContain("regenerate DROPBOX_TOKEN");
+    // Never echoes the raw body (which can reflect the request).
+    expect(msg).not.toContain("API function");
+  });
 });
